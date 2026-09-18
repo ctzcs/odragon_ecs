@@ -45,19 +45,19 @@ mask_new :: proc(w: ^World, allocator := context.allocator) -> Mask_Builder {
 // mirroring DragonECS's EcsMask.New(world).Inc<T>().
 
 mask_inc :: proc(b: ^Mask_Builder, $T: typeid) -> ^Mask_Builder {
-	get_pool(b.world, T)
+	ensure_pool(b.world, T)
 	append(&b.inc, component_id(T))
 	return b
 }
 
 mask_exc :: proc(b: ^Mask_Builder, $T: typeid) -> ^Mask_Builder {
-	get_pool(b.world, T)
+	ensure_pool(b.world, T)
 	append(&b.exc, component_id(T))
 	return b
 }
 
 mask_any :: proc(b: ^Mask_Builder, $T: typeid) -> ^Mask_Builder {
-	get_pool(b.world, T)
+	ensure_pool(b.world, T)
 	append(&b.any, component_id(T))
 	return b
 }

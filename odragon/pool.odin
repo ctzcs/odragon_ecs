@@ -122,9 +122,7 @@ pool_add :: proc(p: ^Pool($T), e: Entity) -> ^T {
 	p.version += 1
 	p.is_densified = false
 	if p.world != nil {
-		world_set_bit(p.world, id, p.cid)
-		p.world.comp_counts[id] += 1
-		p.world.version += 1
+		world_notify_add(p.world, id, p.cid)
 	}
 	pool_fire_add(p, e)
 	return &p.items[item]
@@ -160,15 +158,7 @@ pool_del :: proc(p: ^Pool($T), e: Entity) {
 	p.version += 1
 	p.is_densified = false
 	if p.world != nil {
-		world_clear_bit(p.world, id, p.cid)
-		p.world.comp_counts[id] -= 1
-		p.world.version += 1
-		// DragonECS rule: an entity that lost its last component is deleted.
-		// During world_release_del_buffer the entity is already sleep-marked,
-		// so this nested del_entity is a no-op there.
-		if p.world.comp_counts[id] == 0 {
-			del_entity(p.world, e)
-		}
+		world_notify_del(p.world, id, p.cid)
 	}
 	pool_fire_del(p, e)
 }
@@ -202,6 +192,7 @@ Any_Pool :: struct {
 	data:      rawptr,
 	cid:       i32,
 	ctype:     typeid,
+	is_tag:    bool,
 	has:       proc(data: rawptr, e: i32) -> bool,
 	add_empty: proc(data: rawptr, e: i32),
 	del:       proc(data: rawptr, e: i32),

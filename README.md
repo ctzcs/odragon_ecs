@@ -73,5 +73,6 @@ for odon.query_next(&q, &e) {
 - [x] 池持有世界回指针：`pool_add/pool_del` 自动同步位图/组件计数/版本号，缓存池指针直用与世界 API 语义一致
 - [x] 跨世界 `copy_entity_cross`、`new_entity_with` 模板创建
 - [x] 基准对比工程 `bench_cs/`（对本机 DragonECS 源码）
+- [x] `Tag_Pool`：零尺寸组件自动路由（`size_of(T) == 0` 即标签，无需标记接口）；无数据载荷，swap-remove 保持 dense 永远紧凑，无需 densify；支持 `tag_pool_set/toggle`；`query1/2/3` 与掩码查询对标签透明（指针出参为 nil)
 
-DragonECS 中尚未移植的部分：`EcsTagPool` 独立存储（当前空 struct 也走普通池，语义正确但多占一个假槽位）、`EcsGroup` 的分页非托管内存（当前是平坦 sparse 数组）、调试元数据/JSON 调试器、多线程扩展。
+DragonECS 中尚未移植的部分：`EcsGroup` 的分页非托管内存（当前是平坦 sparse 数组，语义一致仅内存布局不同）、调试元数据/JSON 调试器、多线程扩展。

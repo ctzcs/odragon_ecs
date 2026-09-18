@@ -228,6 +228,27 @@ world_clear_bit :: proc "contextless" (w: ^World, e: i32, cid: i32) {
 	w.masks[(e << w.mask_shift) + (cid >> 5)] &= ~(1 << u32(cid & 31))
 }
 
+// Notification helpers called by both Pool and Tag_Pool on structural change.
+@(private)
+world_notify_add :: proc(w: ^World, id: i32, cid: i32) {
+	world_set_bit(w, id, cid)
+	w.comp_counts[id] += 1
+	w.version += 1
+}
+
+// The DragonECS rule lives here: an entity that lost its last component is
+// deleted. During world_release_del_buffer the entity is already
+// sleep-marked, so the nested del_entity is a no-op there.
+@(private)
+world_notify_del :: proc(w: ^World, id: i32, cid: i32) {
+	world_clear_bit(w, id, cid)
+	w.comp_counts[id] -= 1
+	w.version += 1
+	if w.comp_counts[id] == 0 {
+		del_entity(w, Entity(id))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Pools (typed API)
 // ---------------------------------------------------------------------------
@@ -247,26 +268,71 @@ get_pool :: proc(w: ^World, $T: typeid) -> ^Pool(T) {
 		slot^ = any_pool_wrap(p)
 		world_ensure_cid(w, cid)
 		w.version += 1
+	} else {
+		assert(!slot.is_tag, "get_pool: T is a tag component (size 0); use get_tag_pool")
 	}
 	return (^Pool(T))(slot.data)
 }
 
-// Adds a zero-initialized component T to the entity; returns a pointer to it.
-// The pool keeps the world bitmap/count in sync, so cached pool pointers can
-// be used directly (pool_add/pool_del) with identical semantics.
+// Tag-pool counterpart for zero-size components.
+get_tag_pool :: proc(w: ^World, $T: typeid) -> ^Tag_Pool(T) {
+	cid := component_id(T)
+	if int(cid) >= len(w.pools) {
+		new_len := max(int(cid) + 1, len(w.pools) * 2)
+		resize(&w.pools, new_len)
+	}
+	slot := &w.pools[cid]
+	if slot.data == nil {
+		p := tag_pool_make(w, cid, w.allocator, T)
+		tag_pool_upsize(p, w.capacity)
+		slot^ = tag_any_pool_wrap(p)
+		world_ensure_cid(w, cid)
+		w.version += 1
+	} else {
+		assert(slot.is_tag, "get_tag_pool: T is a data component; use get_pool")
+	}
+	return (^Tag_Pool(T))(slot.data)
+}
+
+// Registers T's pool in the world, picking Pool or Tag_Pool by size.
+ensure_pool :: proc(w: ^World, $T: typeid) {
+	when size_of(T) == 0 {
+		get_tag_pool(w, T)
+	} else {
+		get_pool(w, T)
+	}
+}
+
+// Adds a component T to the entity. For zero-size T this routes to the tag
+// pool and returns nil; otherwise returns a pointer to the zero-initialized
+// component. Pools keep the world bitmap/count in sync, so cached pool
+// pointers can be used directly with identical semantics.
 add :: proc(w: ^World, e: Entity, $T: typeid) -> ^T {
 	assert(is_alive(w, e), "add: entity is not alive")
-	return pool_add(get_pool(w, T), e)
+	when size_of(T) == 0 {
+		tag_pool_add(get_tag_pool(w, T), e)
+		return nil
+	} else {
+		return pool_add(get_pool(w, T), e)
+	}
 }
 
 get :: proc(w: ^World, e: Entity, $T: typeid) -> ^T {
-	p := get_pool(w, T)
-	return pool_get(p, e)
+	when size_of(T) == 0 {
+		return nil
+	} else {
+		p := get_pool(w, T)
+		return pool_get(p, e)
+	}
 }
 
 try_get :: proc(w: ^World, e: Entity, $T: typeid) -> (^T, bool) {
-	p := get_pool(w, T)
-	return pool_try_get(p, e)
+	when size_of(T) == 0 {
+		return nil, has(w, e, T)
+	} else {
+		p := get_pool(w, T)
+		return pool_try_get(p, e)
+	}
 }
 
 has :: proc(w: ^World, e: Entity, $T: typeid) -> bool {
@@ -274,13 +340,17 @@ has :: proc(w: ^World, e: Entity, $T: typeid) -> bool {
 	if int(cid) >= len(w.pools) || w.pools[cid].data == nil {
 		return false
 	}
-	return pool_has((^Pool(T))(w.pools[cid].data), e)
+	return w.pools[cid].has(w.pools[cid].data, i32(e))
 }
 
 // Removes the component. If it was the entity's last component, the entity is
 // automatically deleted (same rule as DragonECS).
 del :: proc(w: ^World, e: Entity, $T: typeid) {
-	pool_del(get_pool(w, T), e)
+	cid := component_id(T)
+	if int(cid) >= len(w.pools) || w.pools[cid].data == nil {
+		return
+	}
+	w.pools[cid].del(w.pools[cid].data, i32(e))
 }
 
 // Copies all components of src onto dst (same world), overwriting existing
