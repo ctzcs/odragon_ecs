@@ -49,6 +49,11 @@ tag_pool_upsize :: proc(p: ^Tag_Pool($T), cap: i32) {
 	}
 }
 
+tag_pool_reserve :: proc(p: ^Tag_Pool($T), cap: i32) {
+	reserve(&p.mapping, int(cap))
+	reserve(&p.dense, int(cap))
+}
+
 tag_pool_has :: proc(p: ^Tag_Pool($T), e: Entity) -> bool {
 	id := i32(e)
 	return id > 0 && id < i32(len(p.mapping)) && p.mapping[id] != 0

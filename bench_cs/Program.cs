@@ -85,6 +85,11 @@ static class Program
             () => Populate(world),
             () => { world.Destroy(); world = new EcsWorld(); GC.Collect(); });
 
+        world = new EcsWorld(new EcsWorldConfig(entitiesCapacity: N), "bench", -1);
+        Measure("create 1M entities, reserved", 3,
+            () => Populate(world),
+            () => { world.Destroy(); world = new EcsWorld(new EcsWorldConfig(entitiesCapacity: N), "bench", -1); GC.Collect(); });
+
         Populate(world);
         aspExc = world.GetAspect<AspExc>();
         aspAny = world.GetAspect<AspAny>();

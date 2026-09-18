@@ -25,25 +25,27 @@ odin run examples/bench -collection:odon=. -o:speed   # 百万实体基准
 
 | 场景 | ODragonECS | DragonECS (C#) 首次 | DragonECS (C#) 缓存后 |
 |---|---|---|---|
-| 创建 100 万实体（3~5 组件） | 61 ms | 75 ms | 51 ms |
+| 创建 100 万实体（3~5 组件） | 64 ms | 75 ms | 51 ms |
+| 创建 100 万实体（容量预留） | **26 ms** | – | 25 ms |
 | 迭代 1 组件 ×100 万 | **1.25 ms** | 16.0 ms | 2.22 ms |
 | 迭代 2 组件（写）×100 万 | 2.02 ms | 9.2 ms | **2.00 ms** |
-| 迭代 3 组件（写）×100 万 | **2.64 ms** | 10.3 ms | 3.01 ms |
-| 稀疏迭代（Pos+Mana)×10 万 | **0.54 ms** | 8.7 ms | 0.60 ms |
-| 掩码查询 Pos+Vel exc Tag ×90 万 | **3.43 ms**（每次全扫） | 11.0 ms | 0.20 ms（遍历缓存 span) |
-| 掩码查询 Pos, any Vel\|Mana ×100 万 | **2.63 ms**（每次全扫） | 8.2 ms | 0.03 ms（遍历缓存 span) |
-| 缓存查询重复+遍历结果 ×90 万 | **0.06 ms** | 2.0 ms | 0.24 ms |
-| 随机访问 pool_get ×100 万（全排列打乱） | **3.34 ms** | 7.2 ms | 4.53 ms |
-| churn：增删 Buff ×10 万 | 0.67 ms | 3.5 ms | **0.69 ms** |
-| 删除 100 万实体（+flush) | **42.3 ms** | 84.2 ms | 56.1 ms |
+| 迭代 3 组件（写）×100 万 | **2.19 ms** | 10.3 ms | 3.01 ms |
+| 稀疏迭代（Pos+Mana)×10 万 | **0.66 ms** | 8.7 ms | 0.60 ms |
+| 掩码查询 Pos+Vel exc Tag ×90 万 | **3.5 ms**(`query_uncached` 每次全扫) | 11.0 ms | 0.20 ms(遍历缓存 span) |
+| 掩码查询 Pos, any Vel\|Mana ×100 万 | **2.9 ms**(每次全扫) | 8.2 ms | 0.03 ms(遍历缓存 span) |
+| `query()` 自动缓存重复 ×90 万 | **1.25 ms**(逐元素迭代器) | 2.0 ms | 0.24 ms |
+| `query_cached` 重复+遍历切片 ×90 万 | **0.06 ms** | – | 0.24 ms |
+| 随机访问 pool_get ×100 万(全排列打乱) | **3.57 ms** | 7.2 ms | 4.53 ms |
+| churn:增删 Buff ×10 万 | 0.67 ms | 3.5 ms | **0.69 ms** |
+| 删除 100 万实体(+flush) | **42.3 ms** | 84.2 ms | 56.1 ms |
 
-口径与结论说明：
+口径与结论说明:
 
-- **缓存语义不同**:DragonECS 的 `Where` 首次扫描后自动缓存结果 span,repeat 查询是"遍历缓存";Odin 的 `query()` 是**无状态迭代器，每次真实全扫**（缓存要用显式的 `query_cached`，返回物化切片）。表里的"掩码查询"行：Odin 列是永久全扫的成本，依然比 DragonECS 的首次扫描快约 3 倍；两边都缓存后 Odin 快约 4 倍（64µs vs 235µs,slice 求和可向量化）。
-- **创建**：持平（C# 略快 ~15%)。DragonECS 的实体创建路径高度优化过；Odin 侧每次 `new_entity` 还维护位图行与计数。
-- **同口径热循环**（迭代、随机访问、churn、删除）：无 GC 的 Odin 全面持平或更快，删除快 ~25%，随机访问快 ~26%。
-- Odin 列是**保留边界检查**的数字；加 `-no-bounds-check` 后随机访问 3.34→2.83ms、稀疏迭代 0.54→0.44ms。
-- C# 侧 GC 影响：创建场景前加了 `GC.Collect()` 降噪；churn 等场景 C# 的 best 与 first 差距主要来自执行器/委托缓存预热，Odin 侧无预热效应。
+- **缓存语义**:`query()` 现在与 DragonECS 的 `Where` 一样**自动走版本缓存**(首次扫描建缓存,之后命中直接迭代物化结果);需要保证实时全扫时用 `query_uncached`。极限吞吐用 `query_cached` 拿切片直接遍历(56µs/90 万,可向量化)。
+- **创建**:DragonECS 默认路径略快(64 vs 51ms);两边都给容量预留后**打平**(26 vs 25ms)。Odin 侧预留 = `world_create(initial_capacity = N)` + `pool_reserve`(池用高水位计数直写,跳过 append)。
+- **热路径写法**:系统应在 init 时缓存池指针,用 `pool_set/pool_add/pool_del` 直写(池自动同步世界位图);组件 ID 注册表带锁,是冷路径。
+- Odin 列是**保留边界检查**的数字;`-no-bounds-check` 还能再省 10~15%。
+- C# 侧 GC 影响:创建场景前加了 `GC.Collect()` 降噪;Odin 侧无预热效应。
 
 ## 快速上手
 

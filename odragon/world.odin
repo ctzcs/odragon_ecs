@@ -62,7 +62,20 @@ resolve_handle :: proc(h: Entity_Long) -> (w: ^World, e: Entity, alive: bool) {
 	return w, entity_of(h), is_alive_handle(w, h)
 }
 
-world_create :: proc(allocator := context.allocator) -> ^World {
+@(private)
+next_pow2_i32 :: proc "contextless" (x: i32) -> i32 {
+	v := i32(1)
+	for v < x {
+		v *= 2
+	}
+	return v
+}
+
+// initial_capacity pre-sizes entity storage (gens/counts/bitmap rows and pool
+// mappings) — worth it for mass spawning; pools can additionally be
+// pre-reserved with pool_reserve.
+world_create :: proc(allocator := context.allocator, initial_capacity: i32 = 64) -> ^World {
+	cap := max(64, next_pow2_i32(initial_capacity))
 	w := new(World, allocator)
 	w.allocator = allocator
 	sync.lock(&_worlds_mu)
@@ -70,12 +83,12 @@ world_create :: proc(allocator := context.allocator) -> ^World {
 	_next_world_id += 1
 	_worlds_by_id[w.id] = w
 	sync.unlock(&_worlds_mu)
-	dispenser_init(&w.dispenser, 64, allocator)
-	w.capacity = 64
-	w.gens = make([dynamic]u16, 64, 64, allocator)
-	w.comp_counts = make([dynamic]i32, 64, 64, allocator)
+	dispenser_init(&w.dispenser, cap, allocator)
+	w.capacity = cap
+	w.gens = make([dynamic]u16, int(cap), int(cap), allocator)
+	w.comp_counts = make([dynamic]i32, int(cap), int(cap), allocator)
 	w.mask_shift = 1
-	w.masks = make([dynamic]i32, 64 << 1, 64 << 1, allocator)
+	w.masks = make([dynamic]i32, int(cap << 1), int(cap << 1), allocator)
 	w.pools = make([dynamic]Any_Pool, 64, 64, allocator)
 	w.del_buffer = make([dynamic]i32, 0, 64, allocator)
 	w.query_cache = make(map[u64]^Cached_Query, 32, allocator)

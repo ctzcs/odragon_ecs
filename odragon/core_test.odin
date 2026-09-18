@@ -129,6 +129,49 @@ test_query_any :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_query_auto_cache :: proc(t: ^testing.T) {
+	w := world_create()
+	defer world_destroy(w)
+
+	for i in 0 ..< 10 {
+		e := new_entity(w)
+		add(w, e, Pos)
+	}
+
+	mb := mask_new(w)
+	mask_inc(&mb, Pos)
+	m := mask_build(&mb)
+	defer mask_destroy(&m)
+
+	// plain query() populates and hits the world query cache
+	q1 := query(w, &m)
+	testing.expect(t, q1.use_cache, "default query must be cache-backed")
+	testing.expect(t, len(w.query_cache) == 1)
+	n := 0
+	e: Entity
+	for query_next(&q1, &e) {
+		n += 1
+	}
+	testing.expect(t, n == 10)
+
+	// structural change invalidates automatically
+	e2 := new_entity(w)
+	add(w, e2, Pos)
+	q2 := query(w, &m)
+	n2 := 0
+	for query_next(&q2, &e) {
+		n2 += 1
+	}
+	testing.expect(t, n2 == 11)
+
+	// uncached path never touches the cache
+	cache_size := len(w.query_cache)
+	q3 := query_uncached(w, &m)
+	for query_next(&q3, &e) {}
+	testing.expect(t, len(w.query_cache) == cache_size)
+}
+
+@(test)
 test_query_single_inc_fast_path :: proc(t: ^testing.T) {
 	w := world_create()
 	defer world_destroy(w)
@@ -145,7 +188,7 @@ test_query_single_inc_fast_path :: proc(t: ^testing.T) {
 	defer mask_destroy(&m)
 
 	sum: f32
-	q := query(w, &m)
+	q := query_uncached(w, &m)
 	testing.expect(t, q.fast, "single-inc mask must take the fast path")
 	e: Entity
 	for query_next(&q, &e) {

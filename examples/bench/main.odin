@@ -46,11 +46,11 @@ populate :: proc(w: ^odon.World) {
 	tags := odon.get_tag_pool(w, TagA)
 	for i in 0 ..< N {
 		e := odon.new_entity(w)
-		odon.pool_add(poses, e)^ = {1, 2, 3}
-		odon.pool_add(vels, e)^ = {1, 1, 1}
-		odon.pool_add(hps, e)^ = {100}
+		odon.pool_set(poses, e, Pos{1, 2, 3})
+		odon.pool_set(vels, e, Vel{1, 1, 1})
+		odon.pool_set(hps, e, Health{100})
 		if i % 10 == 0 {
-			odon.pool_add(manas, e)^ = {50}
+			odon.pool_set(manas, e, Mana{50})
 			odon.tag_pool_add(tags, e)
 		}
 	}
@@ -101,6 +101,31 @@ main :: proc() {
 			s := (^State)(context.user_ptr)
 			odon.world_destroy(s.w)
 			s.w = odon.world_create()
+		},
+	)
+
+	// same, with capacity hints (world_create cap + pool_reserve, both set up
+	// outside the timed region — matching the C# EcsWorldConfig ctor)
+	prepare_reserved :: proc(s: ^State) {
+		odon.world_destroy(s.w)
+		s.w = odon.world_create(initial_capacity = N)
+		odon.pool_reserve(odon.get_pool(s.w, Pos), N)
+		odon.pool_reserve(odon.get_pool(s.w, Vel), N)
+		odon.pool_reserve(odon.get_pool(s.w, Health), N)
+		odon.pool_reserve(odon.get_pool(s.w, Mana), N)
+		odon.tag_pool_reserve(odon.get_tag_pool(s.w, TagA), N)
+	}
+	prepare_reserved(&s)
+	measure(
+		"create 1M entities, reserved",
+		3,
+		proc() {
+			s := (^State)(context.user_ptr)
+			populate(s.w)
+		},
+		proc() {
+			s := (^State)(context.user_ptr)
+			prepare_reserved(s)
 		},
 	)
 
@@ -174,7 +199,7 @@ main :: proc() {
 	measure("mask query scan, uncached (Pos+Vel, exc Tag) x900k", REPEATS, proc() {
 		s := (^State)(context.user_ptr)
 		n: i32
-		q := odon.query(s.w, &s.mask_exc)
+		q := odon.query_uncached(s.w, &s.mask_exc)
 		e: odon.Entity
 		for odon.query_next(&q, &e) {
 			n += 1
@@ -185,10 +210,21 @@ main :: proc() {
 	measure("mask query scan, uncached (Pos, any Vel|Mana) x1M", REPEATS, proc() {
 		s := (^State)(context.user_ptr)
 		n: i32
-		q := odon.query(s.w, &s.mask_any)
+		q := odon.query_uncached(s.w, &s.mask_any)
 		e: odon.Entity
 		for odon.query_next(&q, &e) {
 			n += 1
+		}
+		s.sink += f32(n)
+	})
+
+	measure("query() auto-cached repeat (exc Tag) x900k", REPEATS, proc() {
+		s := (^State)(context.user_ptr)
+		n: i32
+		q := odon.query(s.w, &s.mask_exc)
+		e: odon.Entity
+		for odon.query_next(&q, &e) {
+			n += i32(e)
 		}
 		s.sink += f32(n)
 	})

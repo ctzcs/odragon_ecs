@@ -28,6 +28,7 @@ Pool :: struct($T: typeid) {
 	item_entities: [dynamic]i32,
 	dense:         [dynamic]i32,
 	recycle:       [dynamic]i32,
+	hw:            i32, // high-water: next never-used item slot (arrays may be pre-lengthened)
 	count:         i32,
 	version:       u32, // bumped on every add/del; used by the query cache
 	listeners:     [dynamic]Pool_Listener,
@@ -52,13 +53,14 @@ pool_make :: proc(w: ^World, cid: i32, allocator: mem.Allocator, $T: typeid) -> 
 	append(&p.dense, 0)
 	p.recycle = make([dynamic]i32, 0, 16, allocator)
 	p.listeners = make([dynamic]Pool_Listener, 0, 4, allocator)
+	p.hw = 1
 	p.is_densified = true
 	return p
 }
 
 pool_destroy_typed :: proc(p: ^Pool($T)) {
 	if p.lc_on_del != nil {
-		for item in 1 ..< len(p.item_entities) {
+		for item in 1 ..< int(p.hw) {
 			if p.item_entities[item] != 0 {
 				p.lc_on_del(p.lc_data, &p.items[item])
 			}
@@ -128,6 +130,12 @@ pool_has :: proc(p: ^Pool($T), e: Entity) -> bool {
 // Adds the component zero-initialized and returns a pointer to it.
 // Debug-asserts if the entity already has it.
 pool_add :: proc(p: ^Pool($T), e: Entity) -> ^T {
+	return pool_set(p, e, T{})
+}
+
+// Single-store variant of pool_add: writes the initial value directly instead
+// of zero-init + overwrite. Hot-path friendly.
+pool_set :: proc(p: ^Pool($T), e: Entity, value: T) -> ^T {
 	id := i32(e)
 	dbg_assert(id > 0 && id < i32(len(p.mapping)), "pool_add: entity out of range")
 	dbg_assert(p.mapping[id] == 0, "pool_add: component already present")
@@ -135,13 +143,16 @@ pool_add :: proc(p: ^Pool($T), e: Entity) -> ^T {
 	if len(p.recycle) > 0 {
 		item = pop(&p.recycle)
 	} else {
-		item = i32(len(p.items))
-		append(&p.items, T{})
-		append(&p.item_entities, 0)
+		item = p.hw
+		p.hw += 1
+		if item >= i32(len(p.items)) {
+			append(&p.items, T{})
+			append(&p.item_entities, 0)
+		}
 	}
+	p.items[item] = value
 	p.mapping[id] = item
 	p.item_entities[item] = id
-	p.items[item] = T{}
 	p.count += 1
 	p.version += 1
 	p.is_densified = false
@@ -153,6 +164,15 @@ pool_add :: proc(p: ^Pool($T), e: Entity) -> ^T {
 	}
 	pool_fire_add(p, e)
 	return &p.items[item]
+}
+
+// Pre-allocates storage for cap components (creation benches, mass spawning).
+// Note: entity ids are 1-based, so storage is sized cap+1.
+pool_reserve :: proc(p: ^Pool($T), cap: i32) {
+	resize(&p.items, int(cap) + 1)
+	resize(&p.item_entities, int(cap) + 1)
+	reserve(&p.dense, int(cap) + 1)
+	resize(&p.mapping, int(cap) + 1)
 }
 
 pool_get :: proc(p: ^Pool($T), e: Entity) -> ^T {
@@ -199,7 +219,7 @@ pool_densify :: proc(p: ^Pool($T)) {
 	}
 	clear(&p.dense)
 	append(&p.dense, 0)
-	#no_bounds_check for item in 1 ..< len(p.item_entities) {
+	#no_bounds_check for item in 1 ..< int(p.hw) {
 		if ent := p.item_entities[item]; ent != 0 {
 			append(&p.dense, ent)
 		}

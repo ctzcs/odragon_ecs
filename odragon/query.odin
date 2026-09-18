@@ -12,17 +12,31 @@ import "core:slice"
 //   - masks without inc constraints scan all world entities.
 
 Query :: struct {
-	world:    ^World,
-	mask:     ^Mask,
-	source:   []i32,
-	cursor:   int,
-	fast:     bool, // single inc, no exc/any: skip mask_matches
-	fast_cid: i32,
+	world:     ^World,
+	mask:      ^Mask,
+	source:    []i32,
+	cached:    []Entity, // set when iterating a cached result slice
+	use_cache: bool,
+	cursor:    int,
+	fast:      bool, // single inc, no exc/any: skip mask_matches
 }
 
-// Creating a query auto-releases the world's deferred deletion buffer
-// (same default as DragonECS's span-returning APIs).
+// Default query: automatically cached. Repeated queries with an equal mask
+// hit the world's versioned query cache and iterate the materialized result
+// instead of rescanning (DragonECS's Where-executor behavior). Use
+// query_uncached for a guaranteed fresh scan.
+//
+// Caveat (same as DragonECS): the cached result buffer belongs to the world;
+// a structural change recomputes it on the next query with the same mask,
+// which invalidates slices held by still-active iterators of that mask.
 query :: proc(w: ^World, m: ^Mask) -> Query {
+	entry := cached_query_entry(w, m)
+	return Query{world = w, mask = m, cached = entry.result[:], use_cache = true}
+}
+
+// Uncached scan: always walks the driving pool / world entities and checks
+// the bitmap, never touches the query cache.
+query_uncached :: proc(w: ^World, m: ^Mask) -> Query {
 	world_release_del_buffer(w)
 	q := Query{world = w, mask = m}
 	if len(m.inc) > 0 {
@@ -50,6 +64,14 @@ query :: proc(w: ^World, m: ^Mask) -> Query {
 }
 
 query_mask_next :: proc(q: ^Query, e_out: ^Entity) -> bool {
+	if q.use_cache {
+		if q.cursor < len(q.cached) {
+			e_out^ = q.cached[q.cursor]
+			q.cursor += 1
+			return true
+		}
+		return false
+	}
 	if q.fast {
 		if q.cursor < len(q.source) {
 			e_out^ = Entity(q.source[q.cursor])
@@ -161,7 +183,7 @@ cached_query_recompute :: proc(w: ^World, entry: ^Cached_Query, m: ^Mask, key: u
 	}
 
 	clear(&entry.result)
-	q := query(w, m)
+	q := query_uncached(w, m)
 	e: Entity
 	for query_mask_next(&q, &e) {
 		append(&entry.result, e)
@@ -180,10 +202,9 @@ cached_query_free :: proc(entry: ^Cached_Query, allocator: mem.Allocator) {
 	free(entry, allocator)
 }
 
-// Cached query. WARNING: the returned slice belongs to the cache entry and is
-// overwritten by the next query_cached call with the same mask (same rule as
-// DragonECS's Where executors).
-query_cached :: proc(w: ^World, m: ^Mask) -> []Entity {
+// Returns the cache entry for a mask, creating/recomputing as needed.
+@(private)
+cached_query_entry :: proc(w: ^World, m: ^Mask) -> ^Cached_Query {
 	world_release_del_buffer(w)
 	key := mask_key(m)
 	entry, ok := w.query_cache[key]
@@ -194,10 +215,10 @@ query_cached :: proc(w: ^World, m: ^Mask) -> []Entity {
 			slice.equal(entry.any, m.any)
 		if ids_match {
 			if cached_query_valid(w, entry) {
-				return entry.result[:]
+				return entry
 			}
 			cached_query_recompute(w, entry, m, key)
-			return entry.result[:]
+			return entry
 		}
 		// hash collision with a different mask: overwrite the entry
 	}
@@ -207,5 +228,12 @@ query_cached :: proc(w: ^World, m: ^Mask) -> []Entity {
 		w.query_cache[key] = entry
 	}
 	cached_query_recompute(w, entry, m, key)
-	return entry.result[:]
+	return entry
+}
+
+// Cached query as a plain slice. WARNING: the returned slice belongs to the
+// cache entry and is overwritten by the next query with an equal mask (same
+// rule as DragonECS's Where executors).
+query_cached :: proc(w: ^World, m: ^Mask) -> []Entity {
+	return cached_query_entry(w, m).result[:]
 }
