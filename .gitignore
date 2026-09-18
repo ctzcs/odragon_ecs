@@ -1,0 +1,14 @@
+# Odin / native build artifacts
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+*.dll
+*.so
+*.dylib
+
+# .NET (bench_cs comparison project)
+bench_cs/bin/
+bench_cs/obj/
