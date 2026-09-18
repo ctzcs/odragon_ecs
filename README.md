@@ -74,6 +74,25 @@ Notes:
 - **Creation**: default paths are 61 vs 51 ms (DragonECS slightly ahead); with capacity reservation on both sides it's a tie at ~24–25 ms (`world_create(initial_capacity = N)` + `pool_reserve`, pools then write via high-water direct indexing, skipping `append`).
 - Odin numbers **keep bounds checks on**; `-no-bounds-check` saves another 10–15%.
 
+### vs flecs 4.1.6 (C, archetype-based — the engine behind oflecs)
+
+`bench_flecs/` mirrors the same scenarios against flecs C directly (oflecs is a thin FFI binding, so its numbers are flecs's). This is the classic archetype-vs-sparse-set tradeoff:
+
+| Scenario | ODragonECS | flecs (C) |
+|---|---|---|
+| Create 1M entities | **61 ms** (25.7 reserved) | 235 ms |
+| Iterate (Pos) ×1M | 1.20 ms | **0.41 ms** |
+| Iterate (Pos+Vel, write) ×1M | 1.86 ms | **0.96 ms** |
+| Iterate (Pos+Vel+Health) ×1M | 2.02 ms | **1.23 ms** |
+| Sparse iteration ×100k | 0.50 ms | **0.04 ms** |
+| Query Pos+Vel exc Tag ×900k (cached, real pass) | **0.06 ms** | 0.20 ms |
+| Random access ×1M (permutation) | **3.55 ms** | 34.1 ms |
+| Churn: add+remove ×100k | **0.67 ms** | 11.7 ms |
+| Delete 1M entities | **44.3 ms** | 66.5 ms |
+
+**Reading it**: flecs packs components per archetype, so bulk iteration is ~1.6–3x faster and sparse iteration ~12x faster; ODragonECS's sparse sets win everything structural by large margins (create 4x, churn 17x, random access 10x, delete 1.5x). Choose by workload: iteration-dominated (rendering, physics sweeps) favors archetypes; churn-heavy gameplay (spawning, buffs, events) favors sparse sets.
+
+
 ## Porting Status
 
 Core (M1–M5): entity id recycling with generation sleep-bit, two-phase deletion, auto-delete on last component removal, `Any_Pool` vtable, inc/exc/any masks (32-bit chunks, smallest-pool-driven iteration, single-inc fast path), pipeline with 5 layers + sort order, versioned query result cache, world singleton components, groups with set ops, `query1/2/3` typed sugar, pool listeners, `copy_entity` (+cross-world), `mask_apply` templates, `Tag_Pool` with swap-remove dense storage, paged group sparse array (64/page, pages freed on empty), global world registry + `resolve_handle`, component lifecycle hooks (`pool_set_lifecycle`), auto-pruned groups.
@@ -132,6 +151,25 @@ odin run examples/bench -collection:odon=. -o:speed   # 百万实体基准
 - **热路径写法**：系统应在 init 时缓存池指针，用 `pool_set/pool_add/pool_del` 直写（池自动同步世界位图）；组件 ID 注册表带锁，是冷路径。
 - Odin 列是**保留边界检查**的数字；`-no-bounds-check` 还能再省 10~15%。
 - C# 侧 GC 影响：创建场景前加了 `GC.Collect()` 降噪；Odin 侧无预热效应。
+
+### vs flecs 4.1.6(C,archetype 阵营,oflecs 的本体)
+
+`bench_flecs/` 用 flecs C 库跑同一组场景（oflecs 只是薄薄的 FFI 绑定,数字即 flecs 本体)。这是经典的 archetype vs 稀疏集权衡:
+
+| 场景 | ODragonECS | flecs (C) |
+|---|---|---|
+| 创建 100 万实体 | **61 ms**(预留 25.7) | 235 ms |
+| 迭代 (Pos) ×100 万 | 1.20 ms | **0.41 ms** |
+| 迭代 (Pos+Vel,写) ×100 万 | 1.86 ms | **0.96 ms** |
+| 迭代 (Pos+Vel+Health) ×100 万 | 2.02 ms | **1.23 ms** |
+| 稀疏迭代 ×10 万 | 0.50 ms | **0.04 ms** |
+| 查询 Pos+Vel exc Tag ×90 万(缓存后真实遍历) | **0.06 ms** | 0.20 ms |
+| 随机访问 ×100 万(全排列打乱) | **3.55 ms** | 34.1 ms |
+| churn:增删 ×10 万 | **0.67 ms** | 11.7 ms |
+| 删除 100 万实体 | **44.3 ms** | 66.5 ms |
+
+**解读**:flecs 按 archetype 紧凑打包组件,批量迭代快 1.6~3 倍、稀疏迭代快 12 倍;ODragonECS 的稀疏集在所有结构性操作上大幅领先(创建 4 倍、churn 17 倍、随机访问 10 倍、删除 1.5 倍)。按负载选型:迭代主导(渲染、物理扫描)选 archetype;churn 主导(刷怪、buff、事件)选稀疏集。
+
 
 ## 移植进度
 
