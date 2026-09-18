@@ -105,8 +105,8 @@ pool_has :: proc(p: ^Pool($T), e: Entity) -> bool {
 // Debug-asserts if the entity already has it.
 pool_add :: proc(p: ^Pool($T), e: Entity) -> ^T {
 	id := i32(e)
-	assert(id > 0 && id < i32(len(p.mapping)), "pool_add: entity out of range")
-	assert(p.mapping[id] == 0, "pool_add: component already present")
+	dbg_assert(id > 0 && id < i32(len(p.mapping)), "pool_add: entity out of range")
+	dbg_assert(p.mapping[id] == 0, "pool_add: component already present")
 	item: i32
 	if len(p.recycle) > 0 {
 		item = pop(&p.recycle)
@@ -130,7 +130,7 @@ pool_add :: proc(p: ^Pool($T), e: Entity) -> ^T {
 
 pool_get :: proc(p: ^Pool($T), e: Entity) -> ^T {
 	id := i32(e)
-	assert(id > 0 && id < i32(len(p.mapping)) && p.mapping[id] != 0, "pool_get: component absent")
+	dbg_assert(id > 0 && id < i32(len(p.mapping)) && p.mapping[id] != 0, "pool_get: component absent")
 	return &p.items[p.mapping[id]]
 }
 

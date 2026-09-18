@@ -308,7 +308,7 @@ ensure_pool :: proc(w: ^World, $T: typeid) {
 // component. Pools keep the world bitmap/count in sync, so cached pool
 // pointers can be used directly with identical semantics.
 add :: proc(w: ^World, e: Entity, $T: typeid) -> ^T {
-	assert(is_alive(w, e), "add: entity is not alive")
+	dbg_assert(is_alive(w, e), "add: entity is not alive")
 	when size_of(T) == 0 {
 		tag_pool_add(get_tag_pool(w, T), e)
 		return nil

@@ -65,7 +65,7 @@ dispenser_acquire :: proc(d: ^Id_Dispenser) -> i32 {
 }
 
 dispenser_release :: proc(d: ^Id_Dispenser, id: i32) {
-	assert(id > 0, "cannot release null entity id")
+	dbg_assert(id > 0, "cannot release null entity id")
 	di := d.sparse[id]
 	last := d.count - 1
 	last_id := d.dense[last]

@@ -56,8 +56,8 @@ tag_pool_has :: proc(p: ^Tag_Pool($T), e: Entity) -> bool {
 
 tag_pool_add :: proc(p: ^Tag_Pool($T), e: Entity) {
 	id := i32(e)
-	assert(id > 0 && id < i32(len(p.mapping)), "tag_pool_add: entity out of range")
-	assert(p.mapping[id] == 0, "tag_pool_add: tag already present")
+	dbg_assert(id > 0 && id < i32(len(p.mapping)), "tag_pool_add: entity out of range")
+	dbg_assert(p.mapping[id] == 0, "tag_pool_add: tag already present")
 	append(&p.dense, id)
 	p.mapping[id] = i32(len(p.dense)) - 1
 	p.count += 1

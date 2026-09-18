@@ -19,16 +19,31 @@ odin run examples/game_loop -collection:odon=.   # 完整游戏循环：事件�
 odin run examples/bench -collection:odon=. -o:speed   # 百万实体基准
 ```
 
-## 基准对比（百万实体，Odin -o:speed vs C# DragonECS / .NET 10 Release，本机单次运行）
+## 基准对比
 
-| 场景 | ODragonECS | DragonECS (C#) |
-|---|---|---|
-| 创建 100 万实体（2~3 组件） | ~72–95 ms | ~81–91 ms |
-| 掩码查询迭代（Pos+Vel, exc Tag，匹配 90 万） | ~3.4–3.7 ms | ~12.8–13.1 ms(首次，含执行器构建） |
-| 缓存查询重复执行 | ~1 µs（返回物化切片） | ~0.2 ms(foreach 迭代缓存 span) |
-| 10 万实体删除+重建 | ~7.2–8.6 ms | ~18.1–18.4 ms |
+测试方法：两边跑**同一组场景**(100 万实体，组件 Pos/Vel/Health + 10% Mana/Tag),Odin 侧 `-o:speed`,C# 侧 .NET 10 Release 直接编译本机 `../DragonECS` 源码（benchmark 工程见 `bench_cs/`，场景逐行镜像 `examples/bench/`)。每项取 5 次运行最优值；"first" 为首次运行（DragonECS 的 Where 执行器首次调用含构建成本，之后自动缓存结果 span)。
 
-注：缓存查询的测量口径不同——Odin 版返回已物化的切片，C# 版仍需 foreach 遍历缓存结果，两者都做到了零重扫。C# 基准工程在 `bench_cs/`，直接编译本机 `../DragonECS` 的源码。
+| 场景 | ODragonECS | DragonECS (C#) 首次 | DragonECS (C#) 缓存后 |
+|---|---|---|---|
+| 创建 100 万实体（3~5 组件） | 61 ms | 75 ms | 51 ms |
+| 迭代 1 组件 ×100 万 | **1.25 ms** | 16.0 ms | 2.22 ms |
+| 迭代 2 组件（写）×100 万 | 2.02 ms | 9.2 ms | **2.00 ms** |
+| 迭代 3 组件（写）×100 万 | **2.64 ms** | 10.3 ms | 3.01 ms |
+| 稀疏迭代（Pos+Mana)×10 万 | **0.54 ms** | 8.7 ms | 0.60 ms |
+| 掩码查询 Pos+Vel exc Tag ×90 万 | **3.43 ms**（每次全扫） | 11.0 ms | 0.20 ms（遍历缓存 span) |
+| 掩码查询 Pos, any Vel\|Mana ×100 万 | **2.63 ms**（每次全扫） | 8.2 ms | 0.03 ms（遍历缓存 span) |
+| 缓存查询重复+遍历结果 ×90 万 | **0.06 ms** | 2.0 ms | 0.24 ms |
+| 随机访问 pool_get ×100 万（全排列打乱） | **3.34 ms** | 7.2 ms | 4.53 ms |
+| churn：增删 Buff ×10 万 | 0.67 ms | 3.5 ms | **0.69 ms** |
+| 删除 100 万实体（+flush) | **42.3 ms** | 84.2 ms | 56.1 ms |
+
+口径与结论说明：
+
+- **缓存语义不同**:DragonECS 的 `Where` 首次扫描后自动缓存结果 span,repeat 查询是"遍历缓存";Odin 的 `query()` 是**无状态迭代器，每次真实全扫**（缓存要用显式的 `query_cached`，返回物化切片）。表里的"掩码查询"行：Odin 列是永久全扫的成本，依然比 DragonECS 的首次扫描快约 3 倍；两边都缓存后 Odin 快约 4 倍（64µs vs 235µs,slice 求和可向量化）。
+- **创建**：持平（C# 略快 ~15%)。DragonECS 的实体创建路径高度优化过；Odin 侧每次 `new_entity` 还维护位图行与计数。
+- **同口径热循环**（迭代、随机访问、churn、删除）：无 GC 的 Odin 全面持平或更快，删除快 ~25%，随机访问快 ~26%。
+- Odin 列是**保留边界检查**的数字；加 `-no-bounds-check` 后随机访问 3.34→2.83ms、稀疏迭代 0.54→0.44ms。
+- C# 侧 GC 影响：创建场景前加了 `GC.Collect()` 降噪；churn 等场景 C# 的 best 与 first 差距主要来自执行器/委托缓存预热，Odin 侧无预热效应。
 
 ## 快速上手
 
