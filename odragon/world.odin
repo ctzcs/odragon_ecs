@@ -1,6 +1,8 @@
-package odragon
+	package odragon
 
+import "base:runtime"
 import "core:mem"
+import "core:sync"
 
 SLEEP_BIT :: 0x8000
 GEN_MAX :: 0x7fff
@@ -25,16 +27,49 @@ World :: struct {
 	alive:       i32,
 	query_cache: map[u64]^Cached_Query, // mask hash -> cached query results
 	world_comps: map[typeid]rawptr, // world singleton components (EcsWorld.Get<T>)
+	groups:      [dynamic]^Group, // registered groups auto-pruned on flush
 }
 
 @(private)
 _next_world_id: i16 = 1
 
+// Global world registry: lets a bare Entity_Long be resolved back to its
+// world (port of DragonECS's static _worlds table + entlong world lookup).
+@(private)
+_worlds_by_id: map[i16]^World
+
+@(private)
+_worlds_mu: sync.Mutex
+
+@(private, init)
+_worlds_init :: proc "contextless" () {
+	context = runtime.default_context()
+	_worlds_by_id = make(map[i16]^World, 16, runtime.heap_allocator())
+}
+
+world_by_id :: proc(id: i16) -> ^World {
+	sync.lock(&_worlds_mu)
+	defer sync.unlock(&_worlds_mu)
+	return _worlds_by_id[id]
+}
+
+// Resolves a long handle to its world + entity, checking liveness.
+resolve_handle :: proc(h: Entity_Long) -> (w: ^World, e: Entity, alive: bool) {
+	w = world_by_id(i16(h.world_id))
+	if w == nil {
+		return nil, NULL_ENTITY, false
+	}
+	return w, entity_of(h), is_alive_handle(w, h)
+}
+
 world_create :: proc(allocator := context.allocator) -> ^World {
 	w := new(World, allocator)
 	w.allocator = allocator
+	sync.lock(&_worlds_mu)
 	w.id = _next_world_id
 	_next_world_id += 1
+	_worlds_by_id[w.id] = w
+	sync.unlock(&_worlds_mu)
 	dispenser_init(&w.dispenser, 64, allocator)
 	w.capacity = 64
 	w.gens = make([dynamic]u16, 64, 64, allocator)
@@ -45,9 +80,12 @@ world_create :: proc(allocator := context.allocator) -> ^World {
 	w.del_buffer = make([dynamic]i32, 0, 64, allocator)
 	w.query_cache = make(map[u64]^Cached_Query, 32, allocator)
 	w.world_comps = make(map[typeid]rawptr, 16, allocator)
+	w.groups = make([dynamic]^Group, 0, 8, allocator)
 	return w
 }
 
+// NOTE: destroy groups before their world. world_destroy does not free
+// user-owned groups, it only drops the registration list.
 world_destroy :: proc(w: ^World) {
 	world_release_del_buffer(w)
 	for &slot in &w.pools {
@@ -64,6 +102,10 @@ world_destroy :: proc(w: ^World) {
 		free(v, w.allocator)
 	}
 	delete(w.world_comps)
+	delete(w.groups)
+	sync.lock(&_worlds_mu)
+	delete_key(&_worlds_by_id, w.id)
+	sync.unlock(&_worlds_mu)
 	dispenser_destroy(&w.dispenser)
 	delete(w.gens)
 	delete(w.comp_counts)
@@ -131,8 +173,32 @@ world_release_del_buffer :: proc(w: ^World) {
 		w.comp_counts[id] = 0
 		dispenser_release(&w.dispenser, id)
 	}
+	// registered groups drop released entities automatically (EcsGroup parity)
+	for g in w.groups {
+		for id in w.del_buffer {
+			group_remove(g, Entity(id))
+		}
+	}
 	clear(&w.del_buffer)
 	w.version += 1
+}
+
+world_register_group :: proc(w: ^World, g: ^Group) {
+	for r in w.groups {
+		if r == g {
+			return
+		}
+	}
+	append(&w.groups, g)
+}
+
+world_unregister_group :: proc(w: ^World, g: ^Group) {
+	for r, i in w.groups {
+		if r == g {
+			unordered_remove(&w.groups, i)
+			return
+		}
+	}
 }
 
 @(private)
@@ -336,11 +402,17 @@ try_get :: proc(w: ^World, e: Entity, $T: typeid) -> (^T, bool) {
 }
 
 has :: proc(w: ^World, e: Entity, $T: typeid) -> bool {
+	id := i32(e)
+	if id <= 0 || id >= w.capacity {
+		return false
+	}
 	cid := component_id(T)
 	if int(cid) >= len(w.pools) || w.pools[cid].data == nil {
 		return false
 	}
-	return w.pools[cid].has(w.pools[cid].data, i32(e))
+	// the world bitmap is the source of truth: one direct bit read, no
+	// vtable indirection into the pool
+	return w.masks[(id << w.mask_shift) + (cid >> 5)] & (1 << u32(cid & 31)) != 0
 }
 
 // Removes the component. If it was the entity's last component, the entity is

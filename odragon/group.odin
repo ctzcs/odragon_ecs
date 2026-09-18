@@ -25,21 +25,27 @@ Group_Page :: struct {
 }
 
 Group :: struct {
+	world:     ^World,
 	dense:     [dynamic]i32,
 	pages:     [dynamic]^Group_Page,
 	allocator: mem.Allocator,
 }
 
+// Groups register with their world and are pruned automatically when buffered
+// entities are released (EcsGroup parity). Destroy groups before their world.
 group_create :: proc(w: ^World, allocator := context.allocator) -> ^Group {
 	g := new(Group, allocator)
+	g.world = w
 	g.allocator = allocator
 	g.dense = make([dynamic]i32, 0, 64, allocator)
 	append(&g.dense, 0)
 	g.pages = make([dynamic]^Group_Page, 0, (w.capacity >> GROUP_PAGE_SHIFT) + 1, allocator)
+	world_register_group(w, g)
 	return g
 }
 
 group_destroy :: proc(g: ^Group) {
+	world_unregister_group(g.world, g)
 	group_clear(g)
 	delete(g.dense)
 	delete(g.pages)

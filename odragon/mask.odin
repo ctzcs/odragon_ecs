@@ -158,19 +158,19 @@ mask_apply :: proc(w: ^World, e: Entity, m: ^Mask) {
 @(private)
 mask_matches :: proc "contextless" (w: ^World, m: ^Mask, e: i32) -> bool {
 	base := e << w.mask_shift
-	for c in m.inc_chunks {
+	#no_bounds_check for c in m.inc_chunks {
 		if w.masks[base + c.index] & c.bits != c.bits {
 			return false
 		}
 	}
-	for c in m.exc_chunks {
+	#no_bounds_check for c in m.exc_chunks {
 		if w.masks[base + c.index] & c.bits != 0 {
 			return false
 		}
 	}
 	if len(m.any_chunks) > 0 {
 		found := false
-		for c in m.any_chunks {
+		#no_bounds_check for c in m.any_chunks {
 			if w.masks[base + c.index] & c.bits != 0 {
 				found = true
 				break

@@ -31,6 +31,9 @@ Pool :: struct($T: typeid) {
 	count:         i32,
 	version:       u32, // bumped on every add/del; used by the query cache
 	listeners:     [dynamic]Pool_Listener,
+	lc_on_init:    proc(data: rawptr, item: ^T), // after add (item zero-initialized)
+	lc_on_del:     proc(data: rawptr, item: ^T), // before removal; free owned resources here
+	lc_data:       rawptr,
 	is_densified:  bool,
 	allocator:     mem.Allocator,
 }
@@ -54,6 +57,13 @@ pool_make :: proc(w: ^World, cid: i32, allocator: mem.Allocator, $T: typeid) -> 
 }
 
 pool_destroy_typed :: proc(p: ^Pool($T)) {
+	if p.lc_on_del != nil {
+		for item in 1 ..< len(p.item_entities) {
+			if p.item_entities[item] != 0 {
+				p.lc_on_del(p.lc_data, &p.items[item])
+			}
+		}
+	}
 	delete(p.mapping)
 	delete(p.items)
 	delete(p.item_entities)
@@ -70,6 +80,20 @@ pool_add_listener :: proc(
 	data: rawptr = nil,
 ) {
 	append(&p.listeners, Pool_Listener{data = data, on_add = on_add, on_del = on_del})
+}
+
+// Per-component lifecycle hooks (port of DragonECS's IEcsComponentLifecycle).
+// on_del receives the component pointer before removal — release owned
+// resources (dynamic arrays, strings, maps) there.
+pool_set_lifecycle :: proc(
+	p: ^Pool($T),
+	on_init: proc(data: rawptr, item: ^T) = nil,
+	on_del: proc(data: rawptr, item: ^T) = nil,
+	data: rawptr = nil,
+) {
+	p.lc_on_init = on_init
+	p.lc_on_del = on_del
+	p.lc_data = data
 }
 
 @(private)
@@ -124,6 +148,9 @@ pool_add :: proc(p: ^Pool($T), e: Entity) -> ^T {
 	if p.world != nil {
 		world_notify_add(p.world, id, p.cid)
 	}
+	if p.lc_on_init != nil {
+		p.lc_on_init(p.lc_data, &p.items[item])
+	}
 	pool_fire_add(p, e)
 	return &p.items[item]
 }
@@ -151,6 +178,9 @@ pool_del :: proc(p: ^Pool($T), e: Entity) {
 	if item == 0 {
 		return
 	}
+	if p.lc_on_del != nil {
+		p.lc_on_del(p.lc_data, &p.items[item])
+	}
 	p.mapping[id] = 0
 	p.item_entities[item] = 0
 	append(&p.recycle, item)
@@ -169,7 +199,7 @@ pool_densify :: proc(p: ^Pool($T)) {
 	}
 	clear(&p.dense)
 	append(&p.dense, 0)
-	for item in 1 ..< len(p.item_entities) {
+	#no_bounds_check for item in 1 ..< len(p.item_entities) {
 		if ent := p.item_entities[item]; ent != 0 {
 			append(&p.dense, ent)
 		}

@@ -90,5 +90,10 @@ for odon.query_next(&q, &e) {
 - [x] 基准对比工程 `bench_cs/`（对本机 DragonECS 源码）
 - [x] `Tag_Pool`：零尺寸组件自动路由（`size_of(T) == 0` 即标签，无需标记接口）；无数据载荷，swap-remove 保持 dense 永远紧凑，无需 densify；支持 `tag_pool_set/toggle`；`query1/2/3` 与掩码查询对标签透明（指针出参为 nil)
 - [x] `Group` 分页 sparse：64 实体/页、页空即释放（非零计数方案，替代 DragonECS 的空页共享+XOR 校验和），内存占用正比于实际成员而非世界容量
+- [x] 全局世界注册表：`world_by_id` / `resolve_handle` 让裸 `Entity_Long` 可解析回世界（对应 DragonECS 的静态世界表 + entlong 解析）
+- [x] 组件生命周期钩子 `pool_set_lifecycle(on_init/on_del)`（对应 `IEcsComponentLifecycle`):on_del 在移除前拿到组件指针，可释放自有资源；池销毁时对存活组件补跑
+- [x] Group 自动剔除死实体：`group_create` 自动注册到世界，flush 时同步（对应 `EcsGroup.OnReleaseDelEntityBuffer_Internal`)
+- [x] `has()` 直读世界位图（一次内存访问，不再走 vtable 进池）
+- [x] 线程安全：全局组件注册表与世界注册表加互斥锁（修掉了并发首次注册的 map 数据竞争）；热循环标 `#no_bounds_check`
 
-DragonECS 中尚未移植的部分：调试元数据/JSON 调试器（建议永不做，Odin 里应走编译期方案）、多线程扩展（DragonECS 主仓本身也不含，在扩展包中）。
+DragonECS 中尚未移植的部分：调试元数据/JSON 调试器（建议永不做，Odin 里应走编译期方案）、多线程 System 调度（DragonECS 主仓本身也不含，在扩展包中）。

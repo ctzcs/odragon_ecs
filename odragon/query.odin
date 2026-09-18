@@ -58,7 +58,7 @@ query_mask_next :: proc(q: ^Query, e_out: ^Entity) -> bool {
 		}
 		return false
 	}
-	for q.cursor < len(q.source) {
+	#no_bounds_check for q.cursor < len(q.source) {
 		id := q.source[q.cursor]
 		q.cursor += 1
 		if !world_alive_id(q.world, id) {
