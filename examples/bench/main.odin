@@ -223,7 +223,7 @@ main :: proc() {
 		n: i32
 		q := odon.query(s.w, &s.mask_exc)
 		e: odon.Entity
-		for odon.query_next(&q, &e) {
+		for #force_inline odon.query_next(&q, &e) {
 			n += i32(e)
 		}
 		s.sink += f32(n)
