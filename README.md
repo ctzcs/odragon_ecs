@@ -74,5 +74,6 @@ for odon.query_next(&q, &e) {
 - [x] 跨世界 `copy_entity_cross`、`new_entity_with` 模板创建
 - [x] 基准对比工程 `bench_cs/`（对本机 DragonECS 源码）
 - [x] `Tag_Pool`：零尺寸组件自动路由（`size_of(T) == 0` 即标签，无需标记接口）；无数据载荷，swap-remove 保持 dense 永远紧凑，无需 densify；支持 `tag_pool_set/toggle`；`query1/2/3` 与掩码查询对标签透明（指针出参为 nil)
+- [x] `Group` 分页 sparse：64 实体/页、页空即释放（非零计数方案，替代 DragonECS 的空页共享+XOR 校验和），内存占用正比于实际成员而非世界容量
 
-DragonECS 中尚未移植的部分：`EcsGroup` 的分页非托管内存（当前是平坦 sparse 数组，语义一致仅内存布局不同）、调试元数据/JSON 调试器、多线程扩展。
+DragonECS 中尚未移植的部分：调试元数据/JSON 调试器（建议永不做，Odin 里应走编译期方案）、多线程扩展（DragonECS 主仓本身也不含，在扩展包中）。

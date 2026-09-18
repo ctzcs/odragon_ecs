@@ -3,15 +3,30 @@ package odragon
 import "core:mem"
 
 // Group: a reusable sparse-set collection of entity ids (port of DragonECS's
-// EcsGroup; uses a flat sparse array instead of paged unmanaged memory —
-// 4 bytes per world-capacity slot).
+// EcsGroup, including its paged sparse storage).
 //
 //	dense[1..] = entity ids, dense[0] unused
-//	sparse[e]  = index into dense (0 = absent)
+//	pages[e >> 6].slots[e & 63] = dense index (0 = absent); nil page = all absent
+//
+// The sparse side is paged (64 entities per page) instead of one flat array
+// per group: a flat array costs 4 bytes x world capacity per group, which
+// adds up when many long-lived groups exist in a large world. Each page
+// tracks its nonzero-slot count and is freed the moment it empties, so memory
+// stays proportional to the occupied id regions.
+// (DragonECS shares a null page + XOR checksums to detect empty pages; the
+// explicit counter achieves the same with O(1) exactness.)
+
+GROUP_PAGE_SHIFT :: 6
+GROUP_PAGE_SIZE :: 1 << GROUP_PAGE_SHIFT // 64
+
+Group_Page :: struct {
+	slots: [GROUP_PAGE_SIZE]i32,
+	count: i32, // nonzero slots; the page is freed when this hits 0
+}
 
 Group :: struct {
 	dense:     [dynamic]i32,
-	sparse:    [dynamic]i32,
+	pages:     [dynamic]^Group_Page,
 	allocator: mem.Allocator,
 }
 
@@ -20,53 +35,79 @@ group_create :: proc(w: ^World, allocator := context.allocator) -> ^Group {
 	g.allocator = allocator
 	g.dense = make([dynamic]i32, 0, 64, allocator)
 	append(&g.dense, 0)
-	g.sparse = make([dynamic]i32, int(w.capacity), int(w.capacity), allocator)
+	g.pages = make([dynamic]^Group_Page, 0, (w.capacity >> GROUP_PAGE_SHIFT) + 1, allocator)
 	return g
 }
 
 group_destroy :: proc(g: ^Group) {
+	group_clear(g)
 	delete(g.dense)
-	delete(g.sparse)
+	delete(g.pages)
 	free(g, g.allocator)
 }
 
 @(private)
-group_ensure :: proc(g: ^Group, e: i32) {
-	for i32(len(g.sparse)) <= e {
-		append(&g.sparse, 0)
+group_page :: proc "contextless" (g: ^Group, e: i32) -> ^Group_Page {
+	pi := e >> GROUP_PAGE_SHIFT
+	if pi >= i32(len(g.pages)) {
+		return nil
 	}
+	return g.pages[pi]
+}
+
+@(private)
+group_page_or_create :: proc(g: ^Group, e: i32) -> ^Group_Page {
+	pi := e >> GROUP_PAGE_SHIFT
+	for i32(len(g.pages)) <= pi {
+		append(&g.pages, nil)
+	}
+	if g.pages[pi] == nil {
+		g.pages[pi] = new(Group_Page, g.allocator) // zero-initialized
+	}
+	return g.pages[pi]
 }
 
 group_add :: proc(g: ^Group, e: Entity) {
 	id := i32(e)
-	group_ensure(g, id)
-	if g.sparse[id] != 0 {
+	page := group_page_or_create(g, id)
+	si := id & (GROUP_PAGE_SIZE - 1)
+	if page.slots[si] != 0 {
 		return
 	}
 	append(&g.dense, id)
-	g.sparse[id] = i32(len(g.dense)) - 1
+	page.slots[si] = i32(len(g.dense)) - 1
+	page.count += 1
 }
 
 group_remove :: proc(g: ^Group, e: Entity) {
 	id := i32(e)
-	if id >= i32(len(g.sparse)) {
+	page := group_page(g, id)
+	if page == nil {
 		return
 	}
-	di := g.sparse[id]
+	si := id & (GROUP_PAGE_SIZE - 1)
+	di := page.slots[si]
 	if di == 0 {
 		return
 	}
 	last := i32(len(g.dense)) - 1
 	last_id := g.dense[last]
 	g.dense[di] = last_id
-	g.sparse[last_id] = di
+	group_page(g, last_id).slots[last_id & (GROUP_PAGE_SIZE - 1)] = di
 	pop(&g.dense)
-	g.sparse[id] = 0
+	page.slots[si] = 0
+	page.count -= 1
+	if page.count == 0 {
+		pi := id >> GROUP_PAGE_SHIFT
+		free(page, g.allocator)
+		g.pages[pi] = nil
+	}
 }
 
 group_has :: proc "contextless" (g: ^Group, e: Entity) -> bool {
 	id := i32(e)
-	return id < i32(len(g.sparse)) && g.sparse[id] != 0
+	page := group_page(g, id)
+	return page != nil && page.slots[id & (GROUP_PAGE_SIZE - 1)] != 0
 }
 
 group_count :: proc "contextless" (g: ^Group) -> i32 {
@@ -74,8 +115,11 @@ group_count :: proc "contextless" (g: ^Group) -> i32 {
 }
 
 group_clear :: proc(g: ^Group) {
-	for id in g.dense[1:] {
-		g.sparse[id] = 0
+	for &p in g.pages {
+		if p != nil {
+			free(p, g.allocator)
+			p = nil
+		}
 	}
 	clear(&g.dense)
 	append(&g.dense, 0)
