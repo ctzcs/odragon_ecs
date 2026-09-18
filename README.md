@@ -54,23 +54,23 @@ Same scenarios on both sides: 1M entities (Pos/Vel/Health + 10% Mana/Tag), Odin 
 
 | Scenario | ODragonECS | DragonECS (C#) first | DragonECS (C#) cached |
 |---|---|---|---|
-| Create 1M entities (3–5 comps) | 61 ms | 74 ms | 51 ms |
-| Create 1M entities (reserved capacity) | **25.5 ms** | – | 23.6 ms |
-| Iterate 1 component ×1M | **1.26 ms** | 15.6 ms | 2.26 ms |
-| Iterate 2 comps (write) ×1M | **2.02 ms** | 11.0 ms | 2.48 ms |
-| Iterate 3 comps (write) ×1M | **2.14 ms** | 12.2 ms | 3.30 ms |
-| Sparse iteration (Pos+Mana) ×100k | **0.43 ms** | 7.5 ms | 0.48 ms |
-| Mask query Pos+Vel exc Tag ×900k | **3.5 ms** (`query_uncached`, full scan) | 10.6 ms | 0.20 ms (cached span) |
-| Mask query Pos, any Vel\|Mana ×1M | **2.7 ms** (full scan) | 7.8 ms | 0.03 ms (cached span) |
-| `query()` auto-cached repeat ×900k | **1.24 ms** (per-element iterator) | 2.0 ms | 0.26 ms |
-| `query_cached` repeat + slice iteration ×900k | **0.06 ms** | – | 0.26 ms |
-| Random access `pool_get` ×1M (permutation) | **3.46 ms** | 5.7 ms | 4.00 ms |
-| Churn: add+del Buff ×100k | 0.67 ms | 4.0 ms | **0.63 ms** |
-| Delete 1M entities (+flush) | **43.6 ms** | 69.8 ms | 56.3 ms |
+| Create 1M entities (3–5 comps) | 61 ms | 74 ms | 50 ms |
+| Create 1M entities (reserved capacity) | **25.7 ms** | – | 23.8 ms |
+| Iterate 1 component ×1M | **1.20 ms** | 14.9 ms | 2.13 ms |
+| Iterate 2 comps (write) ×1M | **1.86 ms** | 11.0 ms | 2.42 ms |
+| Iterate 3 comps (write) ×1M | **2.02 ms** | 11.9 ms | 3.22 ms |
+| Sparse iteration (Pos+Mana) ×100k | 0.50 ms | 7.3 ms | **0.47 ms** |
+| Mask query Pos+Vel exc Tag ×900k | **3.5 ms** (`query_uncached`, full scan) | 9.5 ms | 0.19 ms (cached span) |
+| Mask query Pos, any Vel\|Mana ×1M | **2.8 ms** (full scan) | 7.1 ms | 0.03 ms (cached span) |
+| `query()` auto-cached repeat ×900k | **0.06 ms** | 2.0 ms | 0.24 ms |
+| `query_cached` repeat + slice iteration ×900k | **0.06 ms** | – | 0.24 ms |
+| Random access `pool_get` ×1M (permutation) | **3.55 ms** | 5.3 ms | 3.96 ms |
+| Churn: add+del Buff ×100k | 0.67 ms | 3.3 ms | **0.64 ms** |
+| Delete 1M entities (+flush) | **44.3 ms** | 70.0 ms | 56.1 ms |
 
 Notes:
 
-- **Cache semantics**: `query()` automatically uses the world's versioned cache (like DragonECS's `Where`); use `query_uncached` for a guaranteed live scan, and `query_cached` for maximum throughput (56µs per 900k results — the returned slice is vectorizable).
+- **Cache semantics**: `query()` automatically uses the world's versioned cache (like DragonECS's `Where`); use `query_uncached` for a guaranteed live scan, and `query_cached` for a slice you can iterate directly. In hot loops write `for #force_inline odon.query_next(&q, &e)` — inlining lets LLVM promote the iterator state to registers and vectorize the loop (58µs per 900k matches, same as raw slice iteration; without it the per-element call costs ~1.2ms).
 - **Creation**: default paths are 61 vs 51 ms (DragonECS slightly ahead); with capacity reservation on both sides it's a tie at ~24–25 ms (`world_create(initial_capacity = N)` + `pool_reserve`, pools then write via high-water direct indexing, skipping `append`).
 - Odin numbers **keep bounds checks on**; `-no-bounds-check` saves another 10–15%.
 
@@ -111,23 +111,23 @@ odin run examples/bench -collection:odon=. -o:speed   # 百万实体基准
 
 | 场景 | ODragonECS | DragonECS (C#) 首次 | DragonECS (C#) 缓存后 |
 |---|---|---|---|
-| 创建 100 万实体（3~5 组件） | 61 ms | 74 ms | 51 ms |
-| 创建 100 万实体（容量预留） | **25.5 ms** | – | 23.6 ms |
-| 迭代 1 组件 ×100 万 | **1.26 ms** | 15.6 ms | 2.26 ms |
-| 迭代 2 组件（写）×100 万 | **2.02 ms** | 11.0 ms | 2.48 ms |
-| 迭代 3 组件（写）×100 万 | **2.14 ms** | 12.2 ms | 3.30 ms |
-| 稀疏迭代（Pos+Mana)×10 万 | **0.43 ms** | 7.5 ms | 0.48 ms |
-| 掩码查询 Pos+Vel exc Tag ×90 万 | **3.5 ms**(`query_uncached` 每次全扫) | 10.6 ms | 0.20 ms(遍历缓存 span) |
-| 掩码查询 Pos, any Vel\|Mana ×100 万 | **2.7 ms**(每次全扫) | 7.8 ms | 0.03 ms(遍历缓存 span) |
-| `query()` 自动缓存重复 ×90 万 | **1.24 ms**(逐元素迭代器) | 2.0 ms | 0.26 ms |
-| `query_cached` 重复+遍历切片 ×90 万 | **0.06 ms** | – | 0.26 ms |
-| 随机访问 pool_get ×100 万(全排列打乱) | **3.46 ms** | 5.7 ms | 4.00 ms |
-| churn:增删 Buff ×10 万 | 0.67 ms | 4.0 ms | **0.63 ms** |
-| 删除 100 万实体(+flush) | **43.6 ms** | 69.8 ms | 56.3 ms |
+| 创建 100 万实体（3~5 组件） | 61 ms | 74 ms | 50 ms |
+| 创建 100 万实体（容量预留） | **25.7 ms** | – | 23.8 ms |
+| 迭代 1 组件 ×100 万 | **1.20 ms** | 14.9 ms | 2.13 ms |
+| 迭代 2 组件（写）×100 万 | **1.86 ms** | 11.0 ms | 2.42 ms |
+| 迭代 3 组件（写）×100 万 | **2.02 ms** | 11.9 ms | 3.22 ms |
+| 稀疏迭代（Pos+Mana)×10 万 | 0.50 ms | 7.3 ms | **0.47 ms** |
+| 掩码查询 Pos+Vel exc Tag ×90 万 | **3.5 ms**(`query_uncached` 每次全扫) | 9.5 ms | 0.19 ms(遍历缓存 span) |
+| 掩码查询 Pos, any Vel\|Mana ×100 万 | **2.8 ms**(每次全扫) | 7.1 ms | 0.03 ms(遍历缓存 span) |
+| `query()` 自动缓存重复 ×90 万 | **0.06 ms** | 2.0 ms | 0.24 ms |
+| `query_cached` 重复+遍历切片 ×90 万 | **0.06 ms** | – | 0.24 ms |
+| 随机访问 pool_get ×100 万(全排列打乱) | **3.55 ms** | 5.3 ms | 3.96 ms |
+| churn:增删 Buff ×10 万 | 0.67 ms | 3.3 ms | **0.64 ms** |
+| 删除 100 万实体(+flush) | **44.3 ms** | 70.0 ms | 56.1 ms |
 
 口径与结论说明:
 
-- **缓存语义**:`query()` 与 DragonECS 的 `Where` 一样**自动走版本缓存**（首次扫描建缓存，之后命中直接迭代物化结果）；需要保证实时全扫时用 `query_uncached`；极限吞吐用 `query_cached` 拿切片直接遍历（56µs/90 万，可向量化）。
+- **缓存语义**:`query()` 与 DragonECS 的 `Where` 一样**自动走版本缓存**（首次扫描建缓存，之后命中直接迭代物化结果）；需要实时全扫用 `query_uncached`；也可 `query_cached` 直接拿切片遍历。热循环建议写 `for #force_inline odon.query_next(&q, &e)`——内联后 LLVM 能把迭代器状态提升进寄存器并向量化（90 万匹配 58µs，与裸切片遍历相同；不内联则每次调用约 1.2ms）。
 - **创建**:DragonECS 默认路径略快（64 vs 51ms)；两边都给容量预留后**打平**(25.5 vs 23.6ms)。Odin 侧预留 = `world_create(initial_capacity = N)` + `pool_reserve`（池用高水位计数直写，跳过 append)。
 - **热路径写法**：系统应在 init 时缓存池指针，用 `pool_set/pool_add/pool_del` 直写（池自动同步世界位图）；组件 ID 注册表带锁，是冷路径。
 - Odin 列是**保留边界检查**的数字；`-no-bounds-check` 还能再省 10~15%。
