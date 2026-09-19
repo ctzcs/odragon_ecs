@@ -12,3 +12,7 @@
 # .NET (bench_cs comparison project)
 bench_cs/bin/
 bench_cs/obj/
+
+# oflecs binding copy (user-local, not redistributed)
+bench_oflecs/oflecs/
+bench_oflecs/bench_oflecs.exe
