@@ -26,7 +26,7 @@ odin run . -collection:odon=/path/to/odragon_ecs
 import odon "odon:odragon"
 ```
 
-Layout: `odragon/` is the library package (nothing else is required); `examples/`, `bench_cs/`, `bench_flecs/`, `bench_oflecs/` are standalone consumers used for testing and benchmarking.
+Layout: `odragon/` is the library package (nothing else is required); `examples/` holds demos; `bench/` holds the benchmark suites (`odon/`, `dragonecs_cs/`, `flecs_c/`, `oflecs/`).
 
 ## Build & Test
 
@@ -34,7 +34,7 @@ Layout: `odragon/` is the library package (nothing else is required); `examples/
 odin test odragon                                     # unit tests
 odin run examples/minimal -collection:odon=.          # minimal movement system
 odin run examples/game_loop -collection:odon=.        # full game loop: event world + layered pipeline
-odin run examples/bench -collection:odon=. -o:speed   # 1M-entity benchmark suite
+odin run bench/odon -collection:odon=. -o:speed        # 1M-entity benchmark suite
 ```
 
 ## Quick Start
@@ -64,7 +64,7 @@ for odon.query_next(&q, &e, &pos, &vel) {
 
 ## Benchmarks vs DragonECS (C#)
 
-Same scenarios on both sides: 1M entities (Pos/Vel/Health + 10% Mana/Tag), Odin `-o:speed` vs .NET 10 Release compiling the local DragonECS source (`bench_cs/` mirrors `examples/bench/` scenario-for-scenario). Best of 5 runs; "first" for C# includes one-time executor construction — DragonECS auto-caches the result span of `Where` afterwards.
+Same scenarios on both sides: 1M entities (Pos/Vel/Health + 10% Mana/Tag), Odin `-o:speed` vs .NET 10 Release compiling the local DragonECS source (`bench/dragonecs_cs/` mirrors `bench/odon/` scenario-for-scenario). Best of 5 runs; "first" for C# includes one-time executor construction — DragonECS auto-caches the result span of `Where` afterwards.
 
 | Scenario | ODragonECS | DragonECS (C#) first | DragonECS (C#) cached |
 |---|---|---|---|
@@ -90,7 +90,7 @@ Notes:
 
 ### vs flecs 4.1.6 / oflecs (archetype-based)
 
-`bench_oflecs/` runs the same scenarios through the local `olib/oflecs` binding (flecs 4.1.6 static lib, FFI included); `bench_flecs/` runs them against flecs C directly (GCC). This is the classic archetype-vs-sparse-set tradeoff:
+`bench/oflecs/` runs the same scenarios through the local `olib/oflecs` binding (flecs 4.1.6 static lib, FFI included); `bench/flecs_c/` runs them against flecs C directly (GCC). This is the classic archetype-vs-sparse-set tradeoff:
 
 | Scenario | ODragonECS | oflecs (Odin) | flecs (C, gcc) |
 |---|---|---|---|
@@ -141,7 +141,7 @@ odin run . -collection:odon=/path/to/odragon_ecs
 import odon "odon:odragon"
 ```
 
-目录结构：`odragon/` 即库包本体（只依赖它）;`examples/`、`bench_cs/`、`bench_flecs/`、`bench_oflecs/` 都是独立的消费端，用于测试和基准对比。
+目录结构：`odragon/` 即库包本体（只依赖它）;`examples/` 是示例;`bench/` 是基准套件(`odon/`、`dragonecs_cs/`、`flecs_c/`、`oflecs/`)。
 
 ## 构建与测试
 
@@ -149,12 +149,12 @@ import odon "odon:odragon"
 odin test odragon                                # 单元测试
 odin run examples/minimal -collection:odon=.     # 最小示例：移动系统
 odin run examples/game_loop -collection:odon=.   # 完整游戏循环：事件世界 + 分层 Pipeline
-odin run examples/bench -collection:odon=. -o:speed   # 百万实体基准
+odin run bench/odon -collection:odon=. -o:speed        # 百万实体基准
 ```
 
 ## 基准对比
 
-测试方法：两边跑**同一组场景**(100 万实体，组件 Pos/Vel/Health + 10% Mana/Tag),Odin 侧 `-o:speed`,C# 侧 .NET 10 Release 直接编译本机 `../DragonECS` 源码（benchmark 工程见 `bench_cs/`，场景逐行镜像 `examples/bench/`)。每项取 5 次运行最优值；"first" 为首次运行（DragonECS 的 Where 执行器首次调用含构建成本，之后自动缓存结果 span)。
+测试方法：两边跑**同一组场景**(100 万实体，组件 Pos/Vel/Health + 10% Mana/Tag),Odin 侧 `-o:speed`,C# 侧 .NET 10 Release 直接编译本机 `../DragonECS` 源码（benchmark 工程见 `bench/dragonecs_cs/`，场景逐行镜像 `bench/odon/`)。每项取 5 次运行最优值；"first" 为首次运行（DragonECS 的 Where 执行器首次调用含构建成本，之后自动缓存结果 span)。
 
 | 场景 | ODragonECS | DragonECS (C#) 首次 | DragonECS (C#) 缓存后 |
 |---|---|---|---|
@@ -182,7 +182,7 @@ odin run examples/bench -collection:odon=. -o:speed   # 百万实体基准
 
 ### vs flecs 4.1.6 / oflecs(archetype 阵营)
 
-`bench_oflecs/` 用本地 `olib/oflecs` 绑定(flecs 4.1.6 静态库,含 FFI 开销)跑同一组场景;`bench_flecs/` 是 flecs C 原版(GCC)。这是经典的 archetype vs 稀疏集权衡:
+`bench/oflecs/` 用本地 `olib/oflecs` 绑定(flecs 4.1.6 静态库,含 FFI 开销)跑同一组场景;`bench/flecs_c/` 是 flecs C 原版(GCC)。这是经典的 archetype vs 稀疏集权衡:
 
 | 场景 | ODragonECS | oflecs (Odin) | flecs (C, gcc) |
 |---|---|---|---|
