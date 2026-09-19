@@ -14,6 +14,20 @@ Key differences from the original:
 - **Tag pools auto-selected** by `size_of(T) == 0` — no marker interface needed.
 - **Thread-safe** global component/world registries (mutex-guarded cold paths; hot paths are lock-free by design — cache pool pointers at system init).
 
+## Using as a Package
+
+Clone the repo anywhere, then add it as an Odin collection:
+
+```sh
+odin run . -collection:odon=/path/to/odragon_ecs
+```
+
+```odin
+import odon "odon:odragon"
+```
+
+Layout: `odragon/` is the library package (nothing else is required); `examples/`, `bench_cs/`, `bench_flecs/`, `bench_oflecs/` are standalone consumers used for testing and benchmarking.
+
 ## Build & Test
 
 ```sh
@@ -114,6 +128,20 @@ Not ported (by decision): debug metadata / JSON debugger (Odin wants compile-tim
 - **显式内存管理**：所有容器带 allocator，必须配对调用 `*_destroy`。
 - **标签池自动路由**:`size_of(T) == 0` 的组件自动走 `Tag_Pool`（无数据载荷、swap-remove、dense 永远紧凑），无需标记接口。
 - **线程安全**：全局组件注册表与世界注册表加互斥锁（冷路径）；热路径设计上无锁——系统 init 时缓存池指针。
+
+## 作为包使用
+
+把仓库克隆到任意位置，作为 Odin collection 引入：
+
+```sh
+odin run . -collection:odon=/path/to/odragon_ecs
+```
+
+```odin
+import odon "odon:odragon"
+```
+
+目录结构：`odragon/` 即库包本体（只依赖它）;`examples/`、`bench_cs/`、`bench_flecs/`、`bench_oflecs/` 都是独立的消费端，用于测试和基准对比。
 
 ## 构建与测试
 
